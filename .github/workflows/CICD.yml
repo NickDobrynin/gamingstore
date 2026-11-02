@@ -1,81 +1,101 @@
 name: Gaming Store Deployment
+
 on:
   push:
     branches:
       - dev
   release:
     types: [published]
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
+    env:
+      SERVER_HOST: ${{ secrets.SERVER_HOST }}
+      SERVER_USER: ${{ secrets.SERVER_USER }}
+      SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+      SERVER_PORT: ${{ secrets.SERVER_PORT }}
+
+      TARGET_DIR: ${{ github.event_name == 'push' && 'public_html/dev' || 'public_html/live' }}
+
+      WP_VERSION_FILE: wp-version-control.cfg
+      WP_ARCHIVE: wordpress.zip
+      CONTENT_ARCHIVE: wpcontent.zip
+      MAINTENANCE_FILE: .maintenance
+
+      WP_EXTRACT_DIR: wordpress
+      WP_CONTENT_DIR: wp-content
+
     steps:
       - name: Checkout code
         uses: actions/checkout@master
-      
+
       - name: Prepare wordpress zip
         run: |
-          WP_LINK=$(cat wp-version-control.cfg)
-          wget -O ./wordpress.zip $WP_LINK
+          WP_LINK=$(cat "$WP_VERSION_FILE")
+          wget -O "./$WP_ARCHIVE" "$WP_LINK"
 
       - name: Prepare plugins and theme zip
         run: |
-          zip -r wpcontent.zip plugins themes mu-plugins
+          zip -r "$CONTENT_ARCHIVE" plugins themes mu-plugins
 
       - name: Copy Zips to Server
         uses: appleboy/scp-action@master
         with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          password: ${{ secrets.SERVER_SSH_PASSWORD }}
-          port: ${{ secrets.SERVER_PORT }}
-          source: "./wordpress.zip, ./wpcontent.zip"
-          target: ${{ github.event_name == 'push' && 'public_html/dev' || 'public_html/live' }}
+          host: ${{ env.SERVER_HOST }}
+          username: ${{ env.SERVER_USER }}
+          password: ${{ env.SERVER_PASSWORD }}
+          port: ${{ env.SERVER_PORT }}
+          source: "./${{ env.WP_ARCHIVE }},./${{ env.CONTENT_ARCHIVE }}"
+          target: ${{ env.TARGET_DIR }}
 
       - name: Enable Maintenance Mode
         uses: appleboy/scp-action@master
         with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          password: ${{ secrets.SERVER_SSH_PASSWORD }}
-          port: ${{ secrets.SERVER_PORT }}
-          source: ".maintenance"
-          target: ${{ github.event_name == 'push' && 'public_html/dev' || 'public_html/live' }}
+          host: ${{ env.SERVER_HOST }}
+          username: ${{ env.SERVER_USER }}
+          password: ${{ env.SERVER_PASSWORD }}
+          port: ${{ env.SERVER_PORT }}
+          source: ${{ env.MAINTENANCE_FILE }}
+          target: ${{ env.TARGET_DIR }}
 
       - name: Update WordPress Core
         uses: appleboy/ssh-action@master
         with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          password: ${{ secrets.SERVER_SSH_PASSWORD }}
-          port: ${{ secrets.SERVER_PORT }}
+          host: ${{ env.SERVER_HOST }}
+          username: ${{ env.SERVER_USER }}
+          password: ${{ env.SERVER_PASSWORD }}
+          port: ${{ env.SERVER_PORT }}
+          envs: TARGET_DIR,WP_ARCHIVE,WP_EXTRACT_DIR
           script: |
-            set -eu
-            TARGET="${{ github.event_name == 'push' && '/home/nikolay/public_html/dev' || '/home/nikolay/public_html/live' }}"
-            unzip -t "$TARGET/wordpress.zip"
-            unzip -o "$TARGET/wordpress.zip" -d "$TARGET/"
-            test -f "$TARGET/wordpress/wp-load.php"
-            cp -a "$TARGET/wordpress/." "$TARGET/"
-            rm -rf "$TARGET/wordpress"
-      
+            find "$TARGET_DIR" -type f -name '*.php' ! -name 'wp-config.php' -delete
+            rm -r "$TARGET_DIR/wp-admin/" "$TARGET_DIR/wp-includes/"
+            unzip -o "$TARGET_DIR/$WP_ARCHIVE" -d "$TARGET_DIR/"
+            mv "$TARGET_DIR/$WP_EXTRACT_DIR"/* "$TARGET_DIR/"
+            rm -r "$TARGET_DIR/$WP_EXTRACT_DIR"
+
       - name: Update Plugins and Theme
         uses: appleboy/ssh-action@master
         with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          password: ${{ secrets.SERVER_SSH_PASSWORD }}
-          port: ${{ secrets.SERVER_PORT }}
+          host: ${{ env.SERVER_HOST }}
+          username: ${{ env.SERVER_USER }}
+          password: ${{ env.SERVER_PASSWORD }}
+          port: ${{ env.SERVER_PORT }}
+          envs: TARGET_DIR,CONTENT_ARCHIVE,WP_CONTENT_DIR
           script: |
-            rm -rf "${{ github.event_name == 'push' && 'public_html/dev' || 'public_html/live' }}/wp-content/plugins" "${{ github.event_name == 'push' && 'public_html/dev' || 'public_html/live' }}/wp-content/themes" "${{ github.event_name == 'push' && 'public_html/dev' || 'public_html/live' }}/wp-content/mu-plugins"
-            unzip -o "${{ github.event_name == 'push' && 'public_html/dev' || 'public_html/live' }}/wpcontent.zip" -d "${{ github.event_name == 'push' && 'public_html/dev' || 'public_html/live' }}/wp-content/"
+            rm -rf "$TARGET_DIR/$WP_CONTENT_DIR/plugins" "$TARGET_DIR/$WP_CONTENT_DIR/themes" "$TARGET_DIR/$WP_CONTENT_DIR/mu-plugins"
+            unzip -o "$TARGET_DIR/$CONTENT_ARCHIVE" -d "$TARGET_DIR/$WP_CONTENT_DIR/"
 
       - name: Disable Maintenance Mode and Remove Zips
         uses: appleboy/ssh-action@master
         with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          password: ${{ secrets.SERVER_SSH_PASSWORD }}
-          port: ${{ secrets.SERVER_PORT }}
+          host: ${{ env.SERVER_HOST }}
+          username: ${{ env.SERVER_USER }}
+          password: ${{ env.SERVER_PASSWORD }}
+          port: ${{ env.SERVER_PORT }}
+          envs: TARGET_DIR,MAINTENANCE_FILE,WP_ARCHIVE,CONTENT_ARCHIVE
           script: |
-            rm -f "${{ github.event_name == 'push' && 'public_html/dev' || 'public_html/live' }}/.maintenance"
-            rm -f "${{ github.event_name == 'push' && 'public_html/dev' || 'public_html/live' }}/wordpress.zip"
-            rm -f "${{ github.event_name == 'push' && 'public_html/dev' || 'public_html/live' }}/wpcontent.zip"
+            rm -f "$TARGET_DIR/$MAINTENANCE_FILE"
+            rm -f "$TARGET_DIR/$WP_ARCHIVE"
+            rm -f "$TARGET_DIR/$CONTENT_ARCHIVE"
