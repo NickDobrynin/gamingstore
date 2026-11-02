@@ -49,11 +49,13 @@ jobs:
           password: ${{ secrets.SERVER_SSH_PASSWORD }}
           port: ${{ secrets.SERVER_PORT }}
           script: |
-            find "${{ github.event_name == 'push' && 'public_html/dev' || 'public_html/live' }}" -type f -name '*.php' ! -name 'wp-config.php' -delete
-            rm -r "${{ github.event_name == 'push' && 'public_html/dev' || 'public_html/live' }}/wp-admin/" "${{ github.event_name == 'push' && 'public_html/dev' || 'public_html/live' }}/wp-includes/"
-            unzip -o "${{ github.event_name == 'push' && 'public_html/dev' || 'public_html/live' }}/wordpress.zip" -d "${{ github.event_name == 'push' && 'public_html/dev' || 'public_html/live' }}/"
-            mv "${{ github.event_name == 'push' && 'public_html/dev' || 'public_html/live' }}/wordpress/*" "${{ github.event_name == 'push' && 'public_html/dev' || 'public_html/live' }}/"
-            rm -r "${{ github.event_name == 'push' && 'public_html/dev' || 'public_html/live' }}/wordpress"
+            set -eu
+            TARGET="${{ github.event_name == 'push' && '/home/nikolay/public_html/dev' || '/home/nikolay/public_html/live' }}"
+            unzip -t "$TARGET/wordpress.zip"
+            unzip -o "$TARGET/wordpress.zip" -d "$TARGET/"
+            test -f "$TARGET/wordpress/wp-load.php"
+            cp -a "$TARGET/wordpress/." "$TARGET/"
+            rm -rf "$TARGET/wordpress"
       
       - name: Update Plugins and Theme
         uses: appleboy/ssh-action@master
